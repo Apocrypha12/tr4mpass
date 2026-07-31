@@ -429,6 +429,7 @@ wait_for_device() {
 
 parse_device_info() {
     local output
+    local dfu_serial_fallback
     output="$("$BINARY" --detect-only 2>&1)" || true
 
     if [ -z "$output" ]; then
@@ -445,11 +446,30 @@ parse_device_info() {
     DEV_MODEL="$(echo "$output" | grep "Product Type:" | sed 's/.*Product Type:[[:space:]]*//')"
     DEV_CHIP_NAME="$(echo "$output" | grep "Chip Name:" | sed 's/.*Chip Name:[[:space:]]*//')"
     DEV_CPID="$(echo "$output" | grep "CPID:" | sed 's/.*CPID:[[:space:]]*//')"
+    DEV_ECID="$(echo "$output" | grep "ECID:" | sed 's/.*ECID:[[:space:]]*//')"
     DEV_IOS="$(echo "$output" | grep "iOS Version:" | sed 's/.*iOS Version:[[:space:]]*//')"
     DEV_SERIAL="$(echo "$output" | grep "Serial:" | sed 's/.*Serial:[[:space:]]*//')"
     DEV_IMEI="$(echo "$output" | grep "IMEI:" | sed 's/.*IMEI:[[:space:]]*//')"
     DEV_CHECKM8="$(echo "$output" | grep "checkm8 vuln:" | sed 's/.*checkm8 vuln:[[:space:]]*//')"
     DEV_DFU="$(echo "$output" | grep "DFU Mode:" | sed 's/.*DFU Mode:[[:space:]]*//')"
+
+    # WSL fallback: if libusb string descriptor reads time out, parse CPID/ECID
+    # from lsusb's iSerial line so the exploit can proceed with --cpid/--ecid.
+    if [ "$DEVICE_MODE" = "dfu" ] &&
+       { [ -z "$DEV_CPID" ] || [ "$DEV_CPID" = "0x0000" ]; } &&
+       command -v lsusb >/dev/null 2>&1; then
+        dfu_serial_fallback="$(
+            lsusb -v -d 05ac:1227 2>/dev/null |
+            sed -n 's/.*iSerial[[:space:]]\+[0-9]\+[[:space:]]\+//p' |
+            grep 'CPID:' | head -n1
+        )"
+        if [ -n "$dfu_serial_fallback" ]; then
+            DEV_SERIAL="$dfu_serial_fallback"
+            DEV_CPID="$(printf '%s\n' "$dfu_serial_fallback" | sed -n 's/.*CPID:\([0-9A-Fa-f]\+\).*/0x\1/p')"
+            DEV_ECID="$(printf '%s\n' "$dfu_serial_fallback" | sed -n 's/.*ECID:\([0-9A-Fa-f]\+\).*/0x\1/p')"
+            msg_warn "Using DFU serial fallback from lsusb (libusb descriptor reads timed out)."
+        fi
+    fi
 
     if [ "$DEV_CHECKM8" = "YES" ]; then
         DEV_BYPASS="Path A (checkm8, A5-A11)"

@@ -128,17 +128,25 @@ int usb_dfu_find(libusb_device_handle **handle, uint8_t *iserial_out)
             g_pre_claim_serial[0] = '\0';
             g_pre_claim_iserial_idx = desc.iSerialNumber;
             if (desc.iSerialNumber != 0) {
-                int n = libusb_get_string_descriptor_ascii(
+                int n = 0;
+                int attempt;
+                for (attempt = 0; attempt < 5; attempt++) {
+                    n = libusb_get_string_descriptor_ascii(
                             *handle, desc.iSerialNumber,
                             (unsigned char *)g_pre_claim_serial,
                             (int)sizeof(g_pre_claim_serial) - 1);
+                    if (n > 0)
+                        break;
+                    if (attempt < 4)
+                        usleep(200000);  /* usbipd control pipe may still be initializing */
+                }
                 if (n > 0) {
                     g_pre_claim_serial[n] = '\0';
                     log_debug("pre-claim serial (idx %u): %s",
                               (unsigned)desc.iSerialNumber, g_pre_claim_serial);
                 } else {
                     g_pre_claim_serial[0] = '\0';
-                    log_debug("pre-claim serial read failed (idx %u): %s",
+                    log_debug("pre-claim serial read failed after retries (idx %u): %s",
                               (unsigned)desc.iSerialNumber,
                               n < 0 ? libusb_strerror(n) : "empty");
                 }
@@ -187,6 +195,46 @@ static int parse_hex_field(const char *serial, const char *key, uint64_t *out)
 }
 
 /*
+ * Fallback descriptor reader for usbipd/libusb stacks where
+ * libusb_get_string_descriptor_ascii() times out while fetching language IDs.
+ * Reads the UTF-16LE string directly with a fixed langid and converts to ASCII.
+ */
+static int read_string_descriptor_utf16_ascii(libusb_device_handle *handle,
+                                              uint8_t index,
+                                              unsigned char *buf, size_t buf_len)
+{
+    unsigned char raw[DFU_SERIAL_MAX * 2];
+    int ret;
+    int raw_len;
+    int out = 0;
+    int i;
+
+    if (!handle || !buf || buf_len < 2 || index == 0)
+        return LIBUSB_ERROR_INVALID_PARAM;
+
+    ret = libusb_get_string_descriptor(handle, index, 0x0409, raw, (int)sizeof(raw));
+    if (ret < 0)
+        return ret;
+    raw_len = ret;
+    if (raw_len < 2 || raw[1] != LIBUSB_DT_STRING)
+        return LIBUSB_ERROR_IO;
+
+    for (i = 2; i + 1 < raw_len && out < (int)buf_len - 1; i += 2) {
+        unsigned char lo = raw[i];
+        unsigned char hi = raw[i + 1];
+        if (hi == 0 && lo >= 0x20 && lo <= 0x7E) {
+            buf[out++] = lo;
+        } else if (hi == 0 && (lo == '\r' || lo == '\n' || lo == '\t')) {
+            buf[out++] = lo;
+        } else {
+            buf[out++] = '?';
+        }
+    }
+    buf[out] = '\0';
+    return out;
+}
+
+/*
  * try_read_serial_descriptor -- Read one string descriptor at `index`
  * into buf (NUL-terminated on success).  Retries transient PIPE/TIMEOUT
  * errors up to twice.  Returns the number of ASCII bytes read (>=0) on
@@ -207,6 +255,13 @@ static int try_read_serial_descriptor(libusb_device_handle *handle,
     for (attempt = 0; attempt < 3; attempt++) {
         ret = libusb_get_string_descriptor_ascii(handle, index,
                                                  buf, (int)buf_len);
+        if (ret > 0)
+            break;
+        if (ret == 0 || ret == LIBUSB_ERROR_TIMEOUT) {
+            int fb = read_string_descriptor_utf16_ascii(handle, index, buf, buf_len);
+            if (fb > 0)
+                return fb;
+        }
         if (ret >= 0)
             break;
         if (ret != LIBUSB_ERROR_PIPE && ret != LIBUSB_ERROR_TIMEOUT)
