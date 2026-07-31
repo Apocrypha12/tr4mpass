@@ -319,18 +319,22 @@ check_wsl_usb_passthrough() {
 
 ensure_usbmuxd() {
     # usbmuxd is required for idevice_id to see normal-mode devices.
-    # If it's not running, try to start it now.
+    # If it's not running, attempt a non-interactive start (never block
+    # for a sudo password -- if it fails we fall back gracefully).
     if ! command -v usbmuxd >/dev/null 2>&1; then
         return 0  # not installed; check_normal will fail gracefully
     fi
     if ! pgrep -x usbmuxd >/dev/null 2>&1; then
-        msg_info "Starting usbmuxd..."
-        if command -v sudo >/dev/null 2>&1; then
-            sudo usbmuxd 2>/dev/null || usbmuxd 2>/dev/null || true
-        else
-            usbmuxd 2>/dev/null || true
-        fi
+        msg_info "usbmuxd not running, attempting to start it..."
+        # -n = non-interactive: fail immediately instead of prompting
+        sudo -n usbmuxd 2>/dev/null || usbmuxd 2>/dev/null || true
         sleep 1
+        if pgrep -x usbmuxd >/dev/null 2>&1; then
+            msg_ok "usbmuxd started."
+        else
+            msg_warn "Could not start usbmuxd automatically."
+            msg_info "Normal-mode detection may not work. Try: sudo usbmuxd"
+        fi
     fi
 }
 
