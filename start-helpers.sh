@@ -130,7 +130,7 @@ macos_prep_pkgconfig() {
 }
 
 install_deps_linux_apt() {
-    local apt_pkgs="libimobiledevice-dev libirecovery-1.0-dev libusb-1.0-0-dev libplist-dev libssl-dev libcurl4-openssl-dev libssh2-1-dev pkg-config build-essential"
+    local apt_pkgs="libimobiledevice-dev libirecovery-1.0-dev libusb-1.0-0-dev libplist-dev libssl-dev libcurl4-openssl-dev libssh2-1-dev pkg-config build-essential usbutils usbmuxd"
     msg_info "Installing dependencies via apt..."
     sudo apt-get update -qq
     sudo apt-get install -y $apt_pkgs
@@ -317,6 +317,23 @@ check_wsl_usb_passthrough() {
     fi
 }
 
+ensure_usbmuxd() {
+    # usbmuxd is required for idevice_id to see normal-mode devices.
+    # If it's not running, try to start it now.
+    if ! command -v usbmuxd >/dev/null 2>&1; then
+        return 0  # not installed; check_normal will fail gracefully
+    fi
+    if ! pgrep -x usbmuxd >/dev/null 2>&1; then
+        msg_info "Starting usbmuxd..."
+        if command -v sudo >/dev/null 2>&1; then
+            sudo usbmuxd 2>/dev/null || usbmuxd 2>/dev/null || true
+        else
+            usbmuxd 2>/dev/null || true
+        fi
+        sleep 1
+    fi
+}
+
 wait_for_device() {
     local timeout=60
     local elapsed=0
@@ -324,6 +341,11 @@ wait_for_device() {
 
     msg_info "Connect your iOS device via USB cable."
     echo ""
+
+    # Ensure usbmuxd is running so idevice_id can see normal-mode devices.
+    if [ "$DETECTED_OS" = "linux" ] || [ "$DETECTED_OS" = "wsl" ]; then
+        ensure_usbmuxd
+    fi
 
     # On WSL show the USB passthrough instructions up front so the user
     # sees them immediately, rather than discovering them mid-poll.

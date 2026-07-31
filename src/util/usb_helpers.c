@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "util/usb_helpers.h"
+#include "util/log.h"
 
 /* Maximum retry attempts for transient USB errors (PIPE/STALL) */
 #define USB_PIPE_MAX_RETRIES  3
@@ -45,9 +46,8 @@ int usb_ctrl_transfer(libusb_device_handle *dev,
 
         /* Transient error -- retry after brief delay */
         if (attempt < USB_PIPE_MAX_RETRIES - 1) {
-            fprintf(stderr, "[usb] transient error %s on attempt %d/%d, "
-                    "retrying...\n", libusb_strerror(ret),
-                    attempt + 1, USB_PIPE_MAX_RETRIES);
+            log_warn("[usb] transient error %s on attempt %d/%d, retrying...",
+                     libusb_strerror(ret), attempt + 1, USB_PIPE_MAX_RETRIES);
             usleep(USB_PIPE_RETRY_DELAY);
         }
     }
@@ -78,9 +78,8 @@ int usb_ctrl_transfer_no_data(libusb_device_handle *dev,
             return ret;
 
         if (attempt < USB_PIPE_MAX_RETRIES - 1) {
-            fprintf(stderr, "[usb] transient error %s on attempt %d/%d, "
-                    "retrying...\n", libusb_strerror(ret),
-                    attempt + 1, USB_PIPE_MAX_RETRIES);
+            log_warn("[usb] transient error %s on attempt %d/%d, retrying...",
+                     libusb_strerror(ret), attempt + 1, USB_PIPE_MAX_RETRIES);
             usleep(USB_PIPE_RETRY_DELAY);
         }
     }
