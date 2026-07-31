@@ -317,6 +317,48 @@ check_wsl_usb_passthrough() {
     fi
 }
 
+start_usbipd_auto_attach() {
+    # On WSL, launch usbipd auto-attach in the background so the device
+    # is automatically re-attached after each USB reset during the exploit.
+    # This is critical for checkm8: the exploit intentionally resets the
+    # USB bus, and usbipd drops the attachment on every disconnect.
+    #
+    # Uses --hardware-id 05ac:1227 (Apple DFU VID:PID) so we don't need
+    # to know the bus ID.  Runs via powershell.exe (Windows-side) with
+    # the process in a hidden window so there's no visible popup.
+    #
+    # Returns the Windows PID in USBIPD_AUTOATTACH_PID, or empty string
+    # on failure (non-fatal -- exploit may still succeed on first try).
+    USBIPD_AUTOATTACH_PID=""
+    if [ "$DETECTED_OS" != "wsl" ]; then
+        return 0
+    fi
+    if ! command -v powershell.exe >/dev/null 2>&1; then
+        return 0
+    fi
+    msg_info "Starting usbipd auto-attach (keeps device visible after USB resets)..."
+    USBIPD_AUTOATTACH_PID=$(
+        powershell.exe -NoProfile -Command \
+            'Start-Process -FilePath usbipd -ArgumentList "attach","--hardware-id","05ac:1227","--wsl","--auto-attach" -WindowStyle Hidden -PassThru | Select-Object -ExpandProperty Id' \
+            2>/dev/null | tr -d '\r\n'
+    ) || USBIPD_AUTOATTACH_PID=""
+    if [ -n "$USBIPD_AUTOATTACH_PID" ]; then
+        msg_ok "usbipd auto-attach running (PID $USBIPD_AUTOATTACH_PID)."
+    else
+        msg_warn "Could not start usbipd auto-attach; exploit retries may fail if device resets."
+    fi
+}
+
+stop_usbipd_auto_attach() {
+    if [ -z "${USBIPD_AUTOATTACH_PID:-}" ]; then
+        return 0
+    fi
+    powershell.exe -NoProfile -Command \
+        "Stop-Process -Id $USBIPD_AUTOATTACH_PID -Force -ErrorAction SilentlyContinue" \
+        2>/dev/null || true
+    USBIPD_AUTOATTACH_PID=""
+}
+
 ensure_usbmuxd() {
     # usbmuxd is required for idevice_id to see normal-mode devices.
     # If it's not running, attempt a non-interactive start (never block

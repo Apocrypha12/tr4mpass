@@ -139,7 +139,15 @@ main() {
         exit 1
     fi
 
-    exec "$BINARY" "$@"
+    # On WSL, keep usbipd auto-attaching the device so it stays visible
+    # after each USB reset the exploit triggers.
+    start_usbipd_auto_attach
+
+    # Run binary (not exec so we can clean up usbipd afterwards).
+    "$BINARY" "$@"
+    _rc=$?
+    stop_usbipd_auto_attach
+    exit $_rc
 }
 
 main "$@"
