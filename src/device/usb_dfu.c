@@ -118,7 +118,13 @@ int usb_dfu_find(libusb_device_handle **handle, uint8_t *iserial_out)
              * the virtual device to drop into a state where descriptor
              * reads on EP0 return 0 bytes.  Cache the result for
              * usb_dfu_read_info() to use as its primary source.
+             *
+             * Brief settle delay: usbipd establishes its vhci_hcd TCP
+             * channel asynchronously after libusb_open returns.  Without
+             * this delay the first control transfer times out even though
+             * the device is physically present.
              */
+            usleep(500000);  /* 500 ms: let usbipd vhci channel settle */
             g_pre_claim_serial[0] = '\0';
             g_pre_claim_iserial_idx = desc.iSerialNumber;
             if (desc.iSerialNumber != 0) {
