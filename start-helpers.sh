@@ -321,27 +321,29 @@ wait_for_device() {
     local timeout=60
     local elapsed=0
     local interval=2
-    local wsl_warned=0
 
     msg_info "Connect your iOS device via USB cable."
     echo ""
 
+    # On WSL show the USB passthrough instructions up front so the user
+    # sees them immediately, rather than discovering them mid-poll.
+    if [ "$DETECTED_OS" = "wsl" ]; then
+        check_wsl_usb_passthrough
+        echo ""
+    fi
+
     while [ $elapsed -lt $timeout ]; do
         if check_dfu; then
             DEVICE_MODE="dfu"
+            echo ""
             msg_ok "Device detected in DFU mode!"
             return 0
         fi
         if check_normal; then
             DEVICE_MODE="normal"
+            echo ""
             msg_ok "Device detected in normal mode!"
             return 0
-        fi
-        if [ "$DETECTED_OS" = "wsl" ] && [ "$wsl_warned" -eq 0 ] && [ "$elapsed" -ge "$interval" ]; then
-            echo ""
-            check_wsl_usb_passthrough
-            echo ""
-            wsl_warned=1
         fi
         printf "\r${CYAN}[*]${RESET} Waiting for device... %ds / %ds" "$elapsed" "$timeout"
         sleep "$interval"
