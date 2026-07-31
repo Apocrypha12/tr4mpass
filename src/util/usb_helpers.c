@@ -14,10 +14,16 @@
  * represents a transient condition that may succeed on retry.
  * LIBUSB_ERROR_PIPE (-9) means the device STALLed the endpoint,
  * which is common during DFU operations and often clears on retry.
+ *
+ * NOTE: LIBUSB_ERROR_TIMEOUT is intentionally NOT retried here.
+ * For checkm8 stage 2/3 async operations, timeouts are the intended
+ * abort mechanism and must return immediately (no added latency).
+ * For normal DFU operations (5000ms timeout), a real timeout means
+ * the device is unresponsive -- retrying won't help.
  */
 static int is_transient_usb_error(int err)
 {
-    return (err == LIBUSB_ERROR_PIPE || err == LIBUSB_ERROR_TIMEOUT);
+    return (err == LIBUSB_ERROR_PIPE);
 }
 
 int usb_ctrl_transfer(libusb_device_handle *dev,
