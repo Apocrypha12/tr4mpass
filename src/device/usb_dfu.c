@@ -167,9 +167,35 @@ int usb_dfu_find(libusb_device_handle **handle, uint8_t *iserial_out)
     libusb_detach_kernel_driver(*handle, 0);  /* Linux: detach kernel driver; ignore error */
 
     /* Claim interface 0 (DFU interface) */
-    int ret = libusb_claim_interface(*handle, 0);
-    if (ret != LIBUSB_SUCCESS)
-        log_warn("failed to claim interface 0: %s (continuing anyway)", libusb_strerror(ret));
+    {
+        int ret = libusb_claim_interface(*handle, 0);
+        if (ret == LIBUSB_ERROR_BUSY) {
+            /*
+             * EBUSY: a previous killed run left the interface claimed
+             * in the kernel's usbip virtual HCD.  Force usbipd to
+             * detach and reattach to clear the stale state, then retry.
+             */
+            log_warn("claim interface 0 busy -- forcing usbipd reattach to clear stale state");
+            libusb_close(*handle);
+            *handle = NULL;
+
+            if (getenv("WSL_DISTRO_NAME")) {
+                system("powershell.exe -NoProfile -NonInteractive -Command "
+                       "'try { usbipd detach --hardware-id 05ac:1227 2>$null } catch {}; "
+                       "Start-Sleep -Milliseconds 2000; "
+                       "try { usbipd attach --hardware-id 05ac:1227 --wsl 2>$null } catch {}' "
+                       ">/dev/null 2>&1");
+                sleep(3); /* wait for re-enumeration */
+            }
+            /* The caller (checkm8_exploit / usb_dfu_find retry) will call
+             * usb_dfu_find again after returning error. */
+            libusb_free_device_list(devs, 1);
+            return -1;
+        }
+        if (ret != LIBUSB_SUCCESS)
+            log_warn("failed to claim interface 0: %s (continuing anyway)",
+                     libusb_strerror(ret));
+    }
 
     return 0;
 }
