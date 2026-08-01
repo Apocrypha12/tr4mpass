@@ -66,6 +66,11 @@ void usb_dfu_cleanup(void)
     }
 }
 
+libusb_context *usb_dfu_ctx(void)
+{
+    return g_ctx;
+}
+
 int usb_dfu_find(libusb_device_handle **handle, uint8_t *iserial_out)
 {
     libusb_device **devs = NULL;
@@ -537,5 +542,10 @@ void usb_dfu_close(libusb_device_handle *handle)
 
     libusb_release_interface(handle, 0);
     libusb_close(handle);
+    /* Invalidate the pre-claim serial cache so the next usb_dfu_find
+     * reads a fresh descriptor (important after exploit -- the serial
+     * may now contain "PWND:" which the stale cache would hide). */
+    g_pre_claim_serial[0] = '\0';
+    g_pre_claim_iserial_idx = 0;
     log_debug("DFU device handle closed");
 }
