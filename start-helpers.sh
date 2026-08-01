@@ -430,16 +430,51 @@ wait_for_device() {
 parse_device_info() {
     local output
     local dfu_serial_fallback
+
+    DEV_MODEL="" DEV_CHIP_NAME="" DEV_CPID="" DEV_ECID="" DEV_IOS=""
+    DEV_SERIAL="" DEV_IMEI="" DEV_CHECKM8="" DEV_DFU=""
+    DEV_BYPASS="(none)"
+    DEV_STATUS="UNSUPPORTED"
+
+    # On Linux/WSL DFU, prefer lsusb directly so the wrapper does not
+    # consume a libusb session before the real exploit starts.
+    if [ "$DEVICE_MODE" = "dfu" ] && command -v lsusb >/dev/null 2>&1; then
+        dfu_serial_fallback="$(
+            lsusb -v -d 05ac:1227 2>/dev/null |
+            sed -n 's/.*iSerial[[:space:]]\+[0-9]\+[[:space:]]\+//p' |
+            grep 'CPID:' | head -n1
+        )"
+        if [ -n "$dfu_serial_fallback" ]; then
+            DEV_SERIAL="$dfu_serial_fallback"
+            DEV_CPID="$(printf '%s\n' "$dfu_serial_fallback" | sed -n 's/.*CPID:\([0-9A-Fa-f]\+\).*/0x\1/p')"
+            DEV_ECID="$(printf '%s\n' "$dfu_serial_fallback" | sed -n 's/.*ECID:\([0-9A-Fa-f]\+\).*/0x\1/p')"
+            DEV_DFU="YES"
+            msg_warn "Using DFU serial info from lsusb to avoid a pre-exploit libusb probe."
+        fi
+    fi
+
+    if [ "$DEVICE_MODE" = "dfu" ] && [ -n "$DEV_CPID" ] && [ "$DEV_CPID" != "0x0000" ]; then
+        case "${DEV_CPID#0x}" in
+            8950|8955|8947|7002|8002|8960|7000|7001|8000|8003|8001|8010|8011|8012|8015)
+                DEV_CHECKM8="YES"
+                DEV_BYPASS="Path A (checkm8, A5-A11)"
+                DEV_STATUS="SUPPORTED"
+                ;;
+            *)
+                DEV_CHECKM8="NO"
+                DEV_BYPASS="Path B (identity, A12+)"
+                DEV_STATUS="SUPPORTED"
+                ;;
+        esac
+        return 0
+    fi
+
     output="$("$BINARY" --detect-only 2>&1)" || true
 
     if [ -z "$output" ]; then
         msg_err "Device query returned no output (binary may have crashed or device disconnected)."
         msg_info "Ensure the device is still connected and try again."
         msg_info "On Linux: check that usbmuxd is running: sudo systemctl status usbmuxd"
-        DEV_MODEL="" DEV_CHIP_NAME="" DEV_CPID="" DEV_IOS=""
-        DEV_SERIAL="" DEV_IMEI="" DEV_CHECKM8="" DEV_DFU=""
-        DEV_BYPASS="(none)"
-        DEV_STATUS="UNSUPPORTED"
         return 0
     fi
 
@@ -453,7 +488,7 @@ parse_device_info() {
     DEV_CHECKM8="$(echo "$output" | grep "checkm8 vuln:" | sed 's/.*checkm8 vuln:[[:space:]]*//')"
     DEV_DFU="$(echo "$output" | grep "DFU Mode:" | sed 's/.*DFU Mode:[[:space:]]*//')"
 
-    # WSL fallback: if libusb string descriptor reads time out, parse CPID/ECID
+    # Fallback: if libusb string descriptor reads time out, parse CPID/ECID
     # from lsusb's iSerial line so the exploit can proceed with --cpid/--ecid.
     if [ "$DEVICE_MODE" = "dfu" ] &&
        { [ -z "$DEV_CPID" ] || [ "$DEV_CPID" = "0x0000" ]; } &&
