@@ -130,7 +130,25 @@ macos_prep_pkgconfig() {
 }
 
 install_deps_linux_apt() {
-    local apt_pkgs="libimobiledevice-dev libirecovery-1.0-dev libusb-1.0-0-dev libplist-dev libssl-dev libcurl4-openssl-dev libssh2-1-dev pkg-config build-essential usbutils usbmuxd"
+    local irecovery_pkg curl_dev_pkg apt_pkgs
+
+    if apt-cache show libirecovery-1.0-dev >/dev/null 2>&1; then
+        irecovery_pkg="libirecovery-1.0-dev"
+    elif apt-cache show libirecovery-dev >/dev/null 2>&1; then
+        irecovery_pkg="libirecovery-dev"
+    else
+        irecovery_pkg="libirecovery-1.0-dev"
+    fi
+
+    if apt-cache show libcurl4-openssl-dev >/dev/null 2>&1; then
+        curl_dev_pkg="libcurl4-openssl-dev"
+    elif apt-cache show libcurl4-gnutls-dev >/dev/null 2>&1; then
+        curl_dev_pkg="libcurl4-gnutls-dev"
+    else
+        curl_dev_pkg="libcurl4-openssl-dev"
+    fi
+
+    apt_pkgs="libimobiledevice-dev $irecovery_pkg libusb-1.0-0-dev libplist-dev libssl-dev $curl_dev_pkg libssh2-1-dev pkg-config build-essential usbutils usbmuxd"
     msg_info "Installing dependencies via apt..."
     sudo apt-get update -qq
     sudo apt-get install -y $apt_pkgs
